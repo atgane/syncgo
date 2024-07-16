@@ -16,6 +16,8 @@ func main() {
 	m.Store(7, 707)
 	m.Store(8, 808)
 
+	fmt.Println(m.LoadOrStore(1, 100))
+
 	m.Range(func(key, value int) bool {
 		if key == 2 {
 			m.Delete(2)

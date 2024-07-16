@@ -48,12 +48,15 @@ func (m *Map[F, T]) LoadAndDelete(k F) (v T, loaded bool) {
 	return v, loaded
 }
 
-func (m *Map[F, T]) LoadOrStore(k F, v T) (p any, loaded bool) {
+func (m *Map[F, T]) LoadOrStore(k F, v T) (T, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	p, loaded = m.m[k]
+	_, loaded := m.m[k]
 	m.m[k] = v
-	return p, loaded
+	if !loaded {
+		return v, false
+	}
+	return v, true
 }
 
 func (m *Map[F, T]) Range(f func(F, T) bool) {
