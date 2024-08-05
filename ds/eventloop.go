@@ -8,10 +8,10 @@ import (
 )
 
 type Eventloop[T any] struct {
-	q  chan T
-	h  Handler[T]
-	dc int
-
+	q       chan T
+	h       Handler[T]
+	dc      int          // dispatch 개수
+	sender  atomic.Int32 // Send중인 컨텍스트 개수
 	closeCh chan struct{}
 	closed  atomic.Bool
 }
@@ -61,13 +61,15 @@ func (e *Eventloop[T]) Run() {
 // 이벤트 전달 메서드. 외부 ctx 종료, Eventloop 닫힘에 대하여 에러 리턴.
 // Send가 정상 처리된 경우 Close가 호출되어도 실행 보장.
 func (e *Eventloop[T]) Send(ctx context.Context, event T) error {
+	e.sender.Add(1)
+	defer e.sender.Add(-1)
+
 	if e.closed.Load() {
 		return ErrorAlreadyClose
 	}
 
+	// context 종료 우선 처리
 	select {
-	case <-e.closeCh:
-		return ErrorAlreadyClose
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
@@ -79,6 +81,7 @@ func (e *Eventloop[T]) Send(ctx context.Context, event T) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case e.q <- event:
+		// Close 호출 이후에 event가 들어가는 경우 dispatch 스핀
 		return nil
 	}
 }
@@ -91,13 +94,13 @@ func (e *Eventloop[T]) Close() {
 	close(e.closeCh)
 }
 
-// 강제 종료. 추가 이벤트를 방지하고 존재하는 이벤트를 무시하고 종료
+// 강제 종료. 추가 이벤트 방지 및 존재하는 이벤트 무시하고 종료
 func (e *Eventloop[T]) ForceClose() {
 	if !e.closed.CompareAndSwap(false, true) {
 		return
 	}
+	close(e.closeCh) // Send() wake
 	close(e.q)
-	close(e.closeCh)
 }
 
 var ErrorAlreadyClose = errors.New("already closed channel")
@@ -105,30 +108,17 @@ var ErrorAlreadyClose = errors.New("already closed channel")
 func (e *Eventloop[T]) dispatch() {
 	for {
 		select {
-		case t, ok := <-e.q: // 이벤트 우선 처리
-			if !ok {
-				return
-			}
-			e.h(t)
-			continue
-		default:
-		}
-
-		// 만약 정상 종료로 인해 closeCh이 닫혀서 loop를 다시 탔는데
-		// 이벤트가 존재하지 않았을 경우 dispatch루프 종료
-		if e.closed.Load() {
-			return
-		}
-
-		select {
 		case t, ok := <-e.q:
 			if !ok {
 				return
 			}
 			e.h(t)
-			continue
-		case <-e.closeCh: // 정상 종료 시 루프 재돌입으로 잔여 이벤트 검색
-			continue
+		case <-e.closeCh:
+			if e.sender.Load() == 0 && len(e.q) == 0 {
+				// 모든 Send() 종료 확인 & 이벤트 없음 확인
+				return
+			}
+			// 이 외의 경우 조건부 스핀
 		}
 	}
 }
