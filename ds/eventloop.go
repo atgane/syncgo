@@ -60,7 +60,7 @@ func (e *Eventloop[T]) Run() {
 
 // 이벤트 전달 메서드. 외부 ctx 종료, Eventloop 닫힘에 대하여 에러 리턴.
 // Send가 정상 처리된 경우 Close가 호출되어도 실행 보장.
-func (e *Eventloop[T]) Send(ctx context.Context, event T) error {
+func (e *Eventloop[T]) Send(ctx context.Context, event T) (err error) {
 	e.sender.Add(1)
 	defer e.sender.Add(-1)
 
@@ -68,12 +68,22 @@ func (e *Eventloop[T]) Send(ctx context.Context, event T) error {
 		return ErrorAlreadyClose
 	}
 
-	// context 종료 우선 처리
+	// 종료 및 닫힘 우선 처리
 	select {
+	case <-e.closeCh:
+		return ErrorAlreadyClose
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
+
+	// ForceClose 시 아래 select문에서 e.q <- event가 호출된 경우
+	// 패닉이 발생하므로 defer & recover로 error 리턴
+	defer func() {
+		if r := recover(); r != nil {
+			err = ErrorAlreadyClose
+		}
+	}()
 
 	select {
 	case <-e.closeCh:
