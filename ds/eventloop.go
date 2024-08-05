@@ -88,7 +88,7 @@ func (e *Eventloop[T]) Send(ctx context.Context, event T) error {
 
 // 정상 종료. 추가 이벤트를 방지하고 현재 존재하는 이벤트를 모두 실행 후 종료
 func (e *Eventloop[T]) Close() {
-	if !e.closed.CompareAndSwap(false, true) {
+	if !e.closed.CompareAndSwap(false, true) { // 이중 close 방지
 		return
 	}
 	close(e.closeCh)
@@ -96,10 +96,11 @@ func (e *Eventloop[T]) Close() {
 
 // 강제 종료. 추가 이벤트 방지 및 존재하는 이벤트 무시하고 종료
 func (e *Eventloop[T]) ForceClose() {
-	if !e.closed.CompareAndSwap(false, true) {
+	if !e.closed.CompareAndSwap(false, true) { // 이중 close 방지
 		return
 	}
-	close(e.closeCh) // Send() wake
+	// Send의 <- e.closeCh를 먼저 깨우고 e.q를 닫아 panic 방지
+	close(e.closeCh)
 	close(e.q)
 }
 
