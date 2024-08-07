@@ -11,7 +11,7 @@ type Eventloop[T any] struct {
 	q       chan T
 	h       Handler[T]
 	dc      int          // dispatch 개수
-	sender  atomic.Int32 // Send중인 컨텍스트 개수
+	state   atomic.Int32 // Send중인 컨텍스트 개수
 	closeCh chan struct{}
 	closed  atomic.Bool
 }
@@ -61,29 +61,19 @@ func (e *Eventloop[T]) Run() {
 // 이벤트 전달 메서드. 외부 ctx 종료, Eventloop 닫힘에 대하여 에러 리턴.
 // Send가 정상 처리된 경우 Close가 호출되어도 실행 보장.
 func (e *Eventloop[T]) Send(ctx context.Context, event T) (err error) {
-	e.sender.Add(1)
-	defer e.sender.Add(-1)
-
 	if e.closed.Load() {
 		return ErrorAlreadyClose
 	}
 
 	// 종료 및 닫힘 우선 처리
 	select {
-	case <-e.closeCh:
-		return ErrorAlreadyClose
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
 
-	// ForceClose 시 아래 select문에서 e.q <- event가 호출된 경우
-	// 패닉이 발생하므로 defer & recover로 error 리턴
-	defer func() {
-		if r := recover(); r != nil {
-			err = ErrorAlreadyClose
-		}
-	}()
+	e.state.Add(1) // Send 메서드를 호출하는 고루틴의 개수 카운팅
+	defer e.state.Add(-1)
 
 	select {
 	case <-e.closeCh:
@@ -109,8 +99,9 @@ func (e *Eventloop[T]) ForceClose() {
 	if !e.closed.CompareAndSwap(false, true) { // 이중 close 방지
 		return
 	}
-	// Send의 <- e.closeCh를 먼저 깨우고 e.q를 닫아 panic 방지
-	close(e.closeCh)
+	close(e.closeCh) // Send의 <- e.closeCh를 먼저 깨우고 e.q를 닫아 panic 방지
+	for e.state.Load() > 0 {
+	}
 	close(e.q)
 }
 
@@ -124,12 +115,21 @@ func (e *Eventloop[T]) dispatch() {
 				return
 			}
 			e.h(t)
+			continue
+		default:
+		}
+
+		select {
+		case t, ok := <-e.q:
+			if !ok {
+				return
+			}
+			e.h(t)
 		case <-e.closeCh:
-			if e.sender.Load() == 0 && len(e.q) == 0 {
+			if e.state.Load() == 0 && len(e.q) == 0 {
 				// 모든 Send() 종료 확인 & 이벤트 없음 확인
 				return
 			}
-			// 이 외의 경우 조건부 스핀
 		}
 	}
 }
