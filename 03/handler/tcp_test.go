@@ -3,6 +3,7 @@ package handler
 import (
 	"net"
 	"syncgo/test/async"
+	"testing"
 )
 
 func findport() int {
@@ -53,4 +54,8 @@ func (h *testServer1) OnRead(conn *Conn[struct{}], b []byte) int {
 		return true
 	})
 	return n
+}
+
+func TestTcpServerClient1(t *testing.T) {
+
 }
