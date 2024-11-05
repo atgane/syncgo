@@ -1,7 +1,6 @@
 package ds
 
 import (
-	"errors"
 	"sync"
 	"sync/atomic"
 )
@@ -104,5 +103,3 @@ func (e *Eventloop[T]) dispatch() {
 		}
 	}
 }
-
-var ErrAlreadyClosedLoop = errors.New("already closed loop")
