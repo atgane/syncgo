@@ -60,6 +60,7 @@ func main() {
 			for {
 				if err := logic(nfd, b); err != nil {
 					fmt.Println("fd error", err)
+					unix.Close(int(nfd))
 					break
 				}
 			}

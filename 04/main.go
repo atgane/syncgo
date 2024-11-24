@@ -105,6 +105,7 @@ func main() {
 						Fd:     int32(event.Fd),
 						Events: 0,
 					})
+					unix.Close(int(event.Fd))
 				}
 			}
 		}
